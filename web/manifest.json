@@ -1,6 +1,6 @@
 {
-    "name": "structural_flutter",
-    "short_name": "structural_flutter",
+    "name": "structural",
+    "short_name": "structural",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
