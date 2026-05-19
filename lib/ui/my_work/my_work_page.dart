@@ -184,6 +184,25 @@ class _MyWorkPageState extends State<MyWorkPage> {
     }
   }
 
+  Future<void> _startTimer(MyWorkTaskCard task) async {
+    await widget.controller.tray.startTask(
+      projectId: task.projectId,
+      taskId: task.id,
+    );
+  }
+
+  Future<void> _pauseTimer() async {
+    await widget.controller.tray.pauseTimer();
+  }
+
+  Future<void> _resumeTimer() async {
+    await widget.controller.tray.resumeTimer();
+  }
+
+  Future<void> _stopTimer() async {
+    await widget.controller.tray.stopTimer();
+  }
+
   @override
   Widget build(BuildContext context) {
     final activeTaskId = widget.controller.tray.activeTaskId;
@@ -220,6 +239,10 @@ class _MyWorkPageState extends State<MyWorkPage> {
                           board: _board!,
                           activeTaskId: activeTaskId,
                           onOpenTask: _openUrl,
+                          onStartTimer: _startTimer,
+                          onPauseTimer: _pauseTimer,
+                          onResumeTimer: _resumeTimer,
+                          onStopTimer: _stopTimer,
                           onLoadMore: _loadMoreColumn,
                         ),
                       ),
@@ -298,12 +321,20 @@ class _KanbanBoard extends StatefulWidget {
     required this.board,
     required this.activeTaskId,
     required this.onOpenTask,
+    required this.onStartTimer,
+    required this.onPauseTimer,
+    required this.onResumeTimer,
+    required this.onStopTimer,
     required this.onLoadMore,
   });
 
   final MyWorkBoard board;
   final int? activeTaskId;
   final Future<void> Function(String url) onOpenTask;
+  final Future<void> Function(MyWorkTaskCard task) onStartTimer;
+  final Future<void> Function() onPauseTimer;
+  final Future<void> Function() onResumeTimer;
+  final Future<void> Function() onStopTimer;
   final void Function(MyWorkColumn column) onLoadMore;
 
   @override
@@ -351,6 +382,10 @@ class _KanbanBoardState extends State<_KanbanBoard> {
             column: column,
             activeTaskId: widget.activeTaskId,
             onOpenTask: widget.onOpenTask,
+            onStartTimer: widget.onStartTimer,
+            onPauseTimer: widget.onPauseTimer,
+            onResumeTimer: widget.onResumeTimer,
+            onStopTimer: widget.onStopTimer,
             onLoadMore: widget.onLoadMore,
           ),
       ],
@@ -368,12 +403,20 @@ class _StatusColumn extends StatelessWidget {
     required this.column,
     required this.activeTaskId,
     required this.onOpenTask,
+    required this.onStartTimer,
+    required this.onPauseTimer,
+    required this.onResumeTimer,
+    required this.onStopTimer,
     required this.onLoadMore,
   });
 
   final MyWorkColumn column;
   final int? activeTaskId;
   final Future<void> Function(String url) onOpenTask;
+  final Future<void> Function(MyWorkTaskCard task) onStartTimer;
+  final Future<void> Function() onPauseTimer;
+  final Future<void> Function() onResumeTimer;
+  final Future<void> Function() onStopTimer;
   final void Function(MyWorkColumn column) onLoadMore;
 
   @override
@@ -466,7 +509,11 @@ class _StatusColumn extends StatelessWidget {
                       return TaskCardWidget(
                         task: task,
                         isActive: isActive,
-                        onOpenInBrowser: () => onOpenTask(task.taskShowUrl),
+                        onView: () => onOpenTask(task.taskShowUrl),
+                        onStart: () => onStartTimer(task),
+                        onPause: onPauseTimer,
+                        onResume: onResumeTimer,
+                        onStop: onStopTimer,
                       );
                     },
                   ),

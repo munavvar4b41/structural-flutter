@@ -72,7 +72,9 @@ When a timer is running:
 - Header with truncated task title and elapsed time
 - Stop, Pause/Resume, Refresh (icon menu items where supported)
 
-Up to five **To do** tasks assigned to you, each with **Start** (stops any running timer and starts the selected task).
+**Project tasks**: up to **15** rows in the menu (assigned **To do** / **In progress**, active task excluded), each clickable to switch the timer. Status is shown as a prefix on each row. The native menu scrolls when the list is tall.
+
+**My Work** task cards: **View**, **Start** / **Pause** / **Resume**, and **Stop** (pause ends the clock without closing the entry; stop closes the session).
 
 ## API endpoints used
 

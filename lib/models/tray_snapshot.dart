@@ -92,6 +92,8 @@ class PendingTrayTask {
     required this.projectNameShort,
     required this.description,
     required this.descriptionTray,
+    required this.status,
+    required this.statusLabel,
   });
 
   factory PendingTrayTask.fromJson(Map<String, dynamic> json) {
@@ -104,6 +106,8 @@ class PendingTrayTask {
       projectNameShort: json['project_name_short'] as String? ?? '',
       description: json['description'] as String? ?? '',
       descriptionTray: json['description_tray'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      statusLabel: json['status_label'] as String? ?? '',
     );
   }
 
@@ -115,4 +119,6 @@ class PendingTrayTask {
   final String projectNameShort;
   final String description;
   final String descriptionTray;
+  final String status;
+  final String statusLabel;
 }

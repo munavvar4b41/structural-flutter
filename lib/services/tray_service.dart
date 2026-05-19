@@ -43,6 +43,20 @@ class TrayService extends ChangeNotifier with TrayListener {
   TraySnapshot? get snapshot => _snapshot;
   int? get activeTaskId => _snapshot?.active?.taskId;
 
+  static const int _pendingMenuLimit = 15;
+
+  Future<void> stopTimer() => _stopTimer();
+
+  Future<void> pauseTimer() => _pauseTimer();
+
+  Future<void> resumeTimer() => _resumeTimer();
+
+  Future<void> startTask({
+    required int projectId,
+    required int taskId,
+  }) =>
+      _startTask(projectId: projectId, taskId: taskId);
+
   Future<void> init() async {
     if (!Platform.isLinux && !Platform.isWindows && !Platform.isMacOS) {
       return;
@@ -159,7 +173,7 @@ class TrayService extends ChangeNotifier with TrayListener {
           label: 'Stop',
           toolTip: 'Stop timer',
           icon: _stopIcon,
-          onClick: () => unawaited(_stop()),
+          onClick: () => unawaited(_stopTimer()),
         ));
         if (active.isPaused) {
           items.add(_timerControlItem(
@@ -167,7 +181,7 @@ class TrayService extends ChangeNotifier with TrayListener {
             label: 'Resume',
             toolTip: 'Resume timer',
             icon: _resumeIcon,
-            onClick: () => unawaited(_resume()),
+            onClick: () => unawaited(_resumeTimer()),
           ));
         } else {
           items.add(_timerControlItem(
@@ -175,7 +189,7 @@ class TrayService extends ChangeNotifier with TrayListener {
             label: 'Pause',
             toolTip: 'Pause timer',
             icon: _pauseIcon,
-            onClick: () => unawaited(_pause()),
+            onClick: () => unawaited(_pauseTimer()),
           ));
         }
         items.add(_timerControlItem(
@@ -188,18 +202,27 @@ class TrayService extends ChangeNotifier with TrayListener {
         items.add(MenuItem.separator());
       }
 
-      for (final task in _snapshot!.pendingTasks) {
-        final title = task.description.isNotEmpty
-            ? task.description
-            : (task.titleShort.isNotEmpty ? task.titleShort : task.title);
-        items.add(_pendingStartItem(
-          task: task,
-          title: title,
-          toolTip: task.description.isNotEmpty ? task.description : null,
-        ));
-      }
-
-      if (_snapshot!.pendingTasks.isNotEmpty) {
+      final pending = _snapshot!.pendingTasks.take(_pendingMenuLimit).toList();
+      if (pending.isNotEmpty) {
+        items.add(
+          MenuItem(
+            key: 'project_tasks_header',
+            label: 'Project tasks',
+            disabled: true,
+          ),
+        );
+        for (final task in pending) {
+          final baseTitle = task.description.isNotEmpty
+              ? task.description
+              : (task.titleShort.isNotEmpty ? task.titleShort : task.title);
+          items.add(
+            _pendingStartItem(
+              task: task,
+              title: _pendingMenuLabel(task, baseTitle),
+              toolTip: task.description.isNotEmpty ? task.description : null,
+            ),
+          );
+        }
         items.add(MenuItem.separator());
       }
     }
@@ -254,12 +277,21 @@ class TrayService extends ChangeNotifier with TrayListener {
     );
   }
 
+  String _pendingMenuLabel(PendingTrayTask task, String title) {
+    if (task.statusLabel.isEmpty) {
+      return title;
+    }
+
+    return '[${task.statusLabel}] $title';
+  }
+
   MenuItem _pendingStartItem({
     required PendingTrayTask task,
     required String title,
     String? toolTip,
   }) {
-    final hint = toolTip ?? 'Start timer';
+    final hint = toolTip ??
+        (_snapshot?.active != null ? 'Switch timer to this task' : 'Start timer');
     if (TrayPlatform.menuIconsSupported && _playIcon != null) {
       return MenuItem(
         key: 'start_${task.id}',
@@ -289,7 +321,7 @@ class TrayService extends ChangeNotifier with TrayListener {
     await _updateTrayLabel();
   }
 
-  Future<void> _stop() async {
+  Future<void> _stopTimer() async {
     try {
       await _applySnapshot(await _api.stopTimer());
     } on DesktopApiException catch (e) {
@@ -299,7 +331,7 @@ class TrayService extends ChangeNotifier with TrayListener {
     }
   }
 
-  Future<void> _pause() async {
+  Future<void> _pauseTimer() async {
     try {
       await _applySnapshot(await _api.pauseTimer());
     } on DesktopApiException catch (e) {
@@ -309,7 +341,7 @@ class TrayService extends ChangeNotifier with TrayListener {
     }
   }
 
-  Future<void> _resume() async {
+  Future<void> _resumeTimer() async {
     try {
       await _applySnapshot(await _api.resumeTimer());
     } on DesktopApiException catch (e) {
