@@ -8,13 +8,18 @@ class AssetPaths {
 
   static final Map<String, String> _cache = {};
 
-  static Future<String> resolve(String assetPath) async {
+  static Future<String?> resolve(String assetPath) async {
     final cached = _cache[assetPath];
     if (cached != null) {
       return cached;
     }
 
-    final bytes = await rootBundle.load(assetPath);
+    final ByteData bytes;
+    try {
+      bytes = await rootBundle.load(assetPath);
+    } catch (_) {
+      return null;
+    }
     final directory = await getApplicationSupportDirectory();
     final trayDir = Directory('${directory.path}/tray_assets');
     if (!await trayDir.exists()) {

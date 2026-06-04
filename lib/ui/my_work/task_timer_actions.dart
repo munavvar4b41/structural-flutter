@@ -106,10 +106,6 @@ class _ActionButton extends StatelessWidget {
       ),
     );
 
-    if (expanded) {
-      return Expanded(child: button);
-    }
-
     return button;
   }
 }

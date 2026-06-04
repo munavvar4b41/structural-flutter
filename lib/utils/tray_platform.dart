@@ -37,10 +37,16 @@ class TrayPlatform {
   static String formatTrayLabel({
     required TraySnapshot? snapshot,
     required DateTime? snapshotFetchedAt,
+    required bool showInactiveBadge,
+    bool systemIdleUnavailable = false,
   }) {
+    if (systemIdleUnavailable) {
+      return 'structural · system idle unavailable';
+    }
+
     final active = snapshot?.active;
     if (active == null) {
-      return 'structural';
+      return showInactiveBadge ? '🔴 structural' : 'structural';
     }
 
     var seconds = active.taskTodaySeconds;
@@ -58,9 +64,11 @@ class TrayPlatform {
             ? active.description
             : active.taskTitleTray);
     if (active.isPaused) {
-      return '$description · $elapsed (paused)';
+      final base = '$description · $elapsed (paused)';
+      return showInactiveBadge ? '🔴 $base' : base;
     }
-    return '$description · $elapsed';
+    final base = '$description · $elapsed';
+    return showInactiveBadge ? '🔴 $base' : base;
   }
 
   static bool get menuIconsSupported => Platform.isWindows || Platform.isMacOS;

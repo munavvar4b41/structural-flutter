@@ -8,6 +8,7 @@ import '../models/tray_snapshot.dart';
 import '../utils/asset_paths.dart';
 import '../utils/tray_platform.dart';
 import 'desktop_api_client.dart';
+import 'system_idle_service.dart';
 
 class TrayService extends ChangeNotifier with TrayListener {
   TrayService({
@@ -20,7 +21,14 @@ class TrayService extends ChangeNotifier with TrayListener {
         _onViewAllTasks = onViewAllTasks,
         _onOpenSettings = onOpenSettings,
         _onRequireLogin = onRequireLogin,
-        _onQuit = onQuit;
+        _onQuit = onQuit {
+    _systemIdle = SystemIdleService(
+      idleThreshold: _inactivityThreshold,
+      pollInterval: const Duration(seconds: 5),
+    );
+  }
+
+  static const Duration _inactivityThreshold = Duration(minutes: 10);
 
   final DesktopApiClient _api;
   final Future<void> Function() _onViewAllTasks;
@@ -33,6 +41,11 @@ class TrayService extends ChangeNotifier with TrayListener {
   Timer? _pollTimer;
   Timer? _tickTimer;
   bool _busy = false;
+  bool _inactivityActionInFlight = false;
+  late final SystemIdleService _systemIdle;
+  bool _systemIdleActive = false;
+  bool _systemIdleSupported = false;
+  bool autoPausedByInactivity = false;
   String? _lastMenuSignature;
   String? _stopIcon;
   String? _pauseIcon;
@@ -47,9 +60,9 @@ class TrayService extends ChangeNotifier with TrayListener {
 
   Future<void> stopTimer() => _stopTimer();
 
-  Future<void> pauseTimer() => _pauseTimer();
+  Future<void> pauseTimer() => _pauseTimer(manual: true);
 
-  Future<void> resumeTimer() => _resumeTimer();
+  Future<void> resumeTimer() => _resumeTimer(manual: true);
 
   Future<void> startTask({
     required int projectId,
@@ -72,12 +85,18 @@ class TrayService extends ChangeNotifier with TrayListener {
     }
 
     trayManager.addListener(this);
-    await trayManager.setIcon(TrayPlatform.trayIconAsset);
+    try {
+      await trayManager.setIcon(TrayPlatform.trayIconAsset);
+    } catch (_) {
+      // Allow startup when icon assets are unavailable.
+    }
     await _updateTrayLabel();
   }
 
   Future<void> start() async {
     await refresh();
+    await _systemIdle.startPolling(onIdleChanged: _onSystemIdleChanged);
+    _systemIdleSupported = _systemIdle.isSupported;
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) => refresh());
     _tickTimer?.cancel();
@@ -86,9 +105,13 @@ class TrayService extends ChangeNotifier with TrayListener {
         unawaited(_updateTrayLabel());
       }
     });
+    await _rebuildMenu(force: true);
   }
 
   Future<void> stop() async {
+    _systemIdleActive = false;
+    autoPausedByInactivity = false;
+    await _systemIdle.stopPolling();
     _pollTimer?.cancel();
     _tickTimer?.cancel();
     trayManager.removeListener(this);
@@ -126,13 +149,16 @@ class TrayService extends ChangeNotifier with TrayListener {
     final active = snapshot.active;
     final pendingIds =
         snapshot.pendingTasks.map((t) => t.id).join(',');
-    return '${active?.taskId}:${active?.isPaused}:$pendingIds';
+    return '${active?.taskId}:${active?.isPaused}:$pendingIds:'
+        '$autoPausedByInactivity:$_systemIdleSupported';
   }
 
   Future<void> _updateTrayLabel() async {
     final label = TrayPlatform.formatTrayLabel(
       snapshot: _snapshot,
       snapshotFetchedAt: _snapshotFetchedAt,
+      showInactiveBadge: _showInactiveBadge,
+      systemIdleUnavailable: !_systemIdleSupported,
     );
     await TrayPlatform.setHoverLabel(label);
   }
@@ -147,31 +173,26 @@ class TrayService extends ChangeNotifier with TrayListener {
     final items = <MenuItem>[];
 
     if (_snapshot == null) {
-      items.add(
-        MenuItem(
-          key: 'loading',
-          label: 'Loading…',
-          disabled: true,
-        ),
-      );
+      items.add(_timerControlItem(
+        key: 'tray_refresh',
+        label: 'Refresh tray',
+        toolTip: 'Load tray data',
+        icon: _refreshIcon,
+        onClick: () => unawaited(refresh()),
+      ));
     } else {
       final active = _snapshot!.active;
       if (active != null) {
-        final headerLabel = active.description.isNotEmpty
+        final taskLabel = active.description.isNotEmpty
             ? active.description
             : active.taskTitleTray;
-        items.add(
-          MenuItem(
-            key: 'active_header',
-            label: headerLabel,
-            toolTip: active.description.isNotEmpty ? active.description : active.taskTitle,
-            disabled: true,
-          ),
-        );
+        final taskToolTip = active.description.isNotEmpty
+            ? active.description
+            : active.taskTitle;
         items.add(_timerControlItem(
           key: 'timer_stop',
-          label: 'Stop',
-          toolTip: 'Stop timer',
+          label: 'Stop · $taskLabel',
+          toolTip: 'Stop timer · $taskToolTip',
           icon: _stopIcon,
           onClick: () => unawaited(_stopTimer()),
         ));
@@ -181,7 +202,7 @@ class TrayService extends ChangeNotifier with TrayListener {
             label: 'Resume',
             toolTip: 'Resume timer',
             icon: _resumeIcon,
-            onClick: () => unawaited(_resumeTimer()),
+            onClick: () => unawaited(_resumeTimer(manual: true)),
           ));
         } else {
           items.add(_timerControlItem(
@@ -189,7 +210,7 @@ class TrayService extends ChangeNotifier with TrayListener {
             label: 'Pause',
             toolTip: 'Pause timer',
             icon: _pauseIcon,
-            onClick: () => unawaited(_pauseTimer()),
+            onClick: () => unawaited(_pauseTimer(manual: true)),
           ));
         }
         items.add(_timerControlItem(
@@ -204,13 +225,6 @@ class TrayService extends ChangeNotifier with TrayListener {
 
       final pending = _snapshot!.pendingTasks.take(_pendingMenuLimit).toList();
       if (pending.isNotEmpty) {
-        items.add(
-          MenuItem(
-            key: 'project_tasks_header',
-            label: 'Project tasks',
-            disabled: true,
-          ),
-        );
         for (final task in pending) {
           final baseTitle = task.description.isNotEmpty
               ? task.description
@@ -250,7 +264,25 @@ class TrayService extends ChangeNotifier with TrayListener {
       ),
     );
 
-    await trayManager.setContextMenu(Menu(items: items));
+    await trayManager.setContextMenu(Menu(items: _compactMenuSeparators(items)));
+  }
+
+  /// Linux AppIndicator/dbusmenu warns on disabled/header-only rows.
+  List<MenuItem> _compactMenuSeparators(List<MenuItem> items) {
+    final compact = <MenuItem>[];
+    for (final item in items) {
+      if (item.type == 'separator') {
+        if (compact.isEmpty || compact.last.type == 'separator') {
+          continue;
+        }
+      }
+      compact.add(item);
+    }
+    while (compact.isNotEmpty && compact.last.type == 'separator') {
+      compact.removeLast();
+    }
+
+    return compact;
   }
 
   MenuItem _timerControlItem({
@@ -316,13 +348,68 @@ class TrayService extends ChangeNotifier with TrayListener {
   Future<void> _applySnapshot(TraySnapshot snapshot) async {
     _snapshot = snapshot;
     _snapshotFetchedAt = DateTime.now();
+    if (_snapshot?.active == null) {
+      _systemIdleActive = false;
+      autoPausedByInactivity = false;
+    }
     notifyListeners();
     await _rebuildMenu(force: true);
     await _updateTrayLabel();
   }
 
+  bool get _showInactiveBadge =>
+      _snapshot?.active != null &&
+      (_systemIdleActive || autoPausedByInactivity);
+
+  Future<void> _onSystemIdleChanged(bool isIdle) async {
+    if (!_systemIdleSupported) {
+      return;
+    }
+
+    _systemIdleActive = isIdle;
+
+    if (_snapshot?.active == null) {
+      await _updateTrayLabel();
+
+      return;
+    }
+
+    if (isIdle) {
+      await _autoPauseTimer();
+    } else if (autoPausedByInactivity && _snapshot?.active?.isPaused == true) {
+      await _autoResumeTimer();
+    }
+
+    await _updateTrayLabel();
+    await _rebuildMenu();
+  }
+
+  bool get _hasRunningTimer =>
+      _snapshot?.active != null && _snapshot!.active!.isPaused == false;
+
+  Future<void> _autoPauseTimer() async {
+    if (_inactivityActionInFlight || !_hasRunningTimer || !_systemIdleSupported) {
+      return;
+    }
+
+    await _pauseTimer(manual: false, reason: 'inactivity');
+  }
+
+  Future<void> _autoResumeTimer() async {
+    if (_inactivityActionInFlight ||
+        !autoPausedByInactivity ||
+        _snapshot?.active?.isPaused != true ||
+        !_systemIdleSupported) {
+      return;
+    }
+
+    await _resumeTimer(manual: false, resumedBy: 'inactivity');
+  }
+
   Future<void> _stopTimer() async {
     try {
+      autoPausedByInactivity = false;
+      _systemIdleActive = false;
       await _applySnapshot(await _api.stopTimer());
     } on DesktopApiException catch (e) {
       if (e.statusCode == 401) {
@@ -331,23 +418,61 @@ class TrayService extends ChangeNotifier with TrayListener {
     }
   }
 
-  Future<void> _pauseTimer() async {
+  Future<void> _pauseTimer({
+    required bool manual,
+    String? reason,
+  }) async {
+    if (_inactivityActionInFlight) {
+      return;
+    }
+    _inactivityActionInFlight = true;
     try {
-      await _applySnapshot(await _api.pauseTimer());
+      final eventAt = DateTime.now();
+      await _applySnapshot(
+        await _api.pauseTimer(
+          reason: manual ? 'manual' : reason,
+          clientEventAt: eventAt,
+        ),
+      );
+      if (manual) {
+        autoPausedByInactivity = false;
+      } else if (reason == 'inactivity') {
+        autoPausedByInactivity = true;
+      }
     } on DesktopApiException catch (e) {
       if (e.statusCode == 401) {
         await _onRequireLogin();
       }
+    } finally {
+      _inactivityActionInFlight = false;
     }
   }
 
-  Future<void> _resumeTimer() async {
+  Future<void> _resumeTimer({
+    required bool manual,
+    String? resumedBy,
+  }) async {
+    if (_inactivityActionInFlight) {
+      return;
+    }
+    _inactivityActionInFlight = true;
     try {
-      await _applySnapshot(await _api.resumeTimer());
+      final eventAt = DateTime.now();
+      await _applySnapshot(
+        await _api.resumeTimer(
+          resumedBy: manual ? 'manual' : resumedBy,
+          clientEventAt: eventAt,
+        ),
+      );
+      if (manual || resumedBy == 'inactivity') {
+        autoPausedByInactivity = false;
+      }
     } on DesktopApiException catch (e) {
       if (e.statusCode == 401) {
         await _onRequireLogin();
       }
+    } finally {
+      _inactivityActionInFlight = false;
     }
   }
 
@@ -356,6 +481,7 @@ class TrayService extends ChangeNotifier with TrayListener {
     required int taskId,
   }) async {
     try {
+      autoPausedByInactivity = false;
       await _applySnapshot(
         await _api.startTimer(projectId: projectId, taskId: taskId),
       );

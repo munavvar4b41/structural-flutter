@@ -42,6 +42,11 @@ endif()
 function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_features(${TARGET} PUBLIC cxx_std_14)
   target_compile_options(${TARGET} PRIVATE -Wall -Werror)
+  # Some Linux plugins still use deprecated system APIs; keep warnings visible
+  # but do not fail the build on deprecation warnings.
+  target_compile_options(${TARGET} PRIVATE -Wno-error=deprecated-declarations)
+  # Silence deprecated API warnings emitted by third-party Linux plugins.
+  target_compile_options(${TARGET} PRIVATE -Wno-deprecated-declarations)
   target_compile_options(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:-O3>")
   target_compile_definitions(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>")
 endfunction()
@@ -53,6 +58,8 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 # System-level dependencies.
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0)
+pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
+find_package(X11)
 
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")

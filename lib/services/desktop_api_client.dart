@@ -125,12 +125,46 @@ class DesktopApiClient {
     return _timerAction('$_baseUrl/api/desktop/timer/stop');
   }
 
-  Future<TraySnapshot> pauseTimer() async {
-    return _timerAction('$_baseUrl/api/desktop/timer/pause');
+  Future<TraySnapshot> pauseTimer({
+    String? reason,
+    DateTime? clientEventAt,
+  }) async {
+    return _timerAction(
+      '$_baseUrl/api/desktop/timer/pause',
+      data: _timerMetadata(reason: reason, clientEventAt: clientEventAt),
+    );
   }
 
-  Future<TraySnapshot> resumeTimer() async {
-    return _timerAction('$_baseUrl/api/desktop/timer/resume');
+  Future<TraySnapshot> resumeTimer({
+    String? resumedBy,
+    DateTime? clientEventAt,
+  }) async {
+    return _timerAction(
+      '$_baseUrl/api/desktop/timer/resume',
+      data: _timerMetadata(
+        resumedBy: resumedBy,
+        clientEventAt: clientEventAt,
+      ),
+    );
+  }
+
+  Map<String, dynamic>? _timerMetadata({
+    String? reason,
+    String? resumedBy,
+    DateTime? clientEventAt,
+  }) {
+    final data = <String, dynamic>{};
+    if (reason != null) {
+      data['reason'] = reason;
+    }
+    if (resumedBy != null) {
+      data['resumed_by'] = resumedBy;
+    }
+    if (clientEventAt != null) {
+      data['client_event_at'] = clientEventAt.toUtc().toIso8601String();
+    }
+
+    return data.isEmpty ? null : data;
   }
 
   Map<String, dynamic> _decodeMap(dynamic raw, {required String context}) {

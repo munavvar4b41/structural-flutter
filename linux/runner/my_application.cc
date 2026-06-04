@@ -1,8 +1,15 @@
 #include "my_application.h"
 
 #include <flutter_linux/flutter_linux.h>
+#include <gio/gio.h>
+#include <cstring>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
+#if __has_include(<X11/extensions/scrnsaver.h>) && __has_include(<X11/Xlib.h>)
+#define STRUCTURAL_HAS_XSCREENSAVER 1
+#include <X11/Xlib.h>
+#include <X11/extensions/scrnsaver.h>
+#endif
 #endif
 
 #include "flutter/generated_plugin_registrant.h"
@@ -13,6 +20,208 @@ struct _MyApplication {
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
+
+static constexpr char kSystemIdleChannel[] = "structural/system_idle";
+
+static bool g_mutter_idle_available = false;
+static bool g_x11_idle_available = false;
+static bool g_idle_support_probed = false;
+static const char* g_mutter_idle_path = nullptr;
+static const char* g_mutter_idle_cached_paths[2] = {nullptr, nullptr};
+
+static const char* kMutterIdlePaths[] = {
+    "/org/gnome/Mutter/IdleMonitor/Core",
+    "/org/gnome/Mutter/IdleMonitor",
+    nullptr,
+};
+
+static bool parse_idletime_variant(GVariant* result, int64_t* idle_ms) {
+  if (result == nullptr) {
+    return false;
+  }
+
+  GVariant* value = result;
+  g_autoptr(GVariant) child = nullptr;
+  if (g_variant_is_of_type(result, G_VARIANT_TYPE("(t)")) ||
+      g_variant_is_of_type(result, G_VARIANT_TYPE("(u)")) ||
+      g_variant_is_of_type(result, G_VARIANT_TYPE("(x)")) ||
+      g_variant_is_of_type(result, G_VARIANT_TYPE("(i)"))) {
+    child = g_variant_get_child_value(result, 0);
+    value = child;
+  }
+
+  if (g_variant_is_of_type(value, G_VARIANT_TYPE_UINT64)) {
+    *idle_ms = static_cast<int64_t>(g_variant_get_uint64(value));
+    return true;
+  }
+  if (g_variant_is_of_type(value, G_VARIANT_TYPE_UINT32)) {
+    *idle_ms = static_cast<int64_t>(g_variant_get_uint32(value));
+    return true;
+  }
+  if (g_variant_is_of_type(value, G_VARIANT_TYPE_INT64)) {
+    *idle_ms = g_variant_get_int64(value);
+    return true;
+  }
+  if (g_variant_is_of_type(value, G_VARIANT_TYPE_INT32)) {
+    *idle_ms = g_variant_get_int32(value);
+    return true;
+  }
+
+  return false;
+}
+
+static bool mutter_get_idle_milliseconds(int64_t* idle_ms) {
+  g_autoptr(GDBusConnection) connection = g_bus_get_sync(
+      G_BUS_TYPE_SESSION, nullptr, nullptr);
+  if (connection == nullptr) {
+    return false;
+  }
+
+  const char* const* paths = kMutterIdlePaths;
+  if (g_mutter_idle_path != nullptr) {
+    g_mutter_idle_cached_paths[0] = g_mutter_idle_path;
+    g_mutter_idle_cached_paths[1] = nullptr;
+    paths = g_mutter_idle_cached_paths;
+  }
+
+  for (gint i = 0; paths[i] != nullptr; i++) {
+    g_autoptr(GVariant) result = g_dbus_connection_call_sync(
+        connection, "org.gnome.Mutter.IdleMonitor", paths[i],
+        "org.gnome.Mutter.IdleMonitor", "GetIdletime", nullptr, nullptr,
+        G_DBUS_CALL_FLAGS_NONE, -1, nullptr, nullptr);
+    if (result == nullptr) {
+      continue;
+    }
+
+    if (parse_idletime_variant(result, idle_ms)) {
+      if (g_mutter_idle_path == nullptr) {
+        g_mutter_idle_path = paths[i];
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
+
+static bool x11_get_idle_milliseconds(int64_t* idle_ms) {
+#if defined(GDK_WINDOWING_X11) && defined(STRUCTURAL_HAS_XSCREENSAVER)
+  GdkDisplay* display = gdk_display_get_default();
+  if (display == nullptr || !GDK_IS_X11_DISPLAY(display)) {
+    return false;
+  }
+
+  Display* xdisplay = gdk_x11_display_get_xdisplay(display);
+  if (xdisplay == nullptr) {
+    return false;
+  }
+
+  XScreenSaverInfo* info = XScreenSaverAllocInfo();
+  if (info == nullptr) {
+    return false;
+  }
+
+  const Window root = DefaultRootWindow(xdisplay);
+  const Status status = XScreenSaverQueryInfo(xdisplay, root, info);
+  if (status == 0) {
+    XFree(info);
+    return false;
+  }
+
+  *idle_ms = static_cast<int64_t>(info->idle);
+  XFree(info);
+  return true;
+#else
+  return false;
+#endif
+}
+
+static void ensure_mutter_idle_available() {
+  if (g_mutter_idle_available) {
+    return;
+  }
+
+  int64_t idle_ms = 0;
+  g_mutter_idle_available = mutter_get_idle_milliseconds(&idle_ms);
+}
+
+static void ensure_x11_idle_available() {
+  if (g_x11_idle_available || g_idle_support_probed) {
+    return;
+  }
+
+#if defined(GDK_WINDOWING_X11) && defined(STRUCTURAL_HAS_XSCREENSAVER)
+  GdkDisplay* display = gdk_display_get_default();
+  if (display != nullptr && GDK_IS_X11_DISPLAY(display)) {
+    int64_t idle_ms = 0;
+    g_x11_idle_available = x11_get_idle_milliseconds(&idle_ms);
+  }
+#endif
+
+  g_idle_support_probed = true;
+}
+
+static bool linux_is_system_idle_supported() {
+  ensure_mutter_idle_available();
+  ensure_x11_idle_available();
+  return g_mutter_idle_available || g_x11_idle_available;
+}
+
+static bool linux_get_idle_milliseconds(int64_t* idle_ms) {
+  ensure_mutter_idle_available();
+  ensure_x11_idle_available();
+
+  if (g_mutter_idle_available && mutter_get_idle_milliseconds(idle_ms)) {
+    return true;
+  }
+
+  if (g_x11_idle_available && x11_get_idle_milliseconds(idle_ms)) {
+    return true;
+  }
+
+  return false;
+}
+
+static void system_idle_method_call_handler(FlMethodChannel* channel,
+                                            FlMethodCall* method_call,
+                                            gpointer user_data) {
+  const gchar* method = fl_method_call_get_name(method_call);
+
+  if (strcmp(method, "isSupported") == 0) {
+    g_autoptr(FlValue) supported =
+        fl_value_new_bool(linux_is_system_idle_supported());
+    g_autoptr(FlMethodResponse) response =
+        FL_METHOD_RESPONSE(fl_method_success_response_new(supported));
+    fl_method_call_respond(method_call, response, nullptr);
+    return;
+  }
+
+  if (strcmp(method, "getIdleMilliseconds") == 0) {
+    int64_t idle_ms = 0;
+    g_autoptr(FlValue) value = linux_get_idle_milliseconds(&idle_ms)
+                                   ? fl_value_new_int(idle_ms)
+                                   : fl_value_new_null();
+    g_autoptr(FlMethodResponse) response =
+        FL_METHOD_RESPONSE(fl_method_success_response_new(value));
+    fl_method_call_respond(method_call, response, nullptr);
+    return;
+  }
+
+  g_autoptr(FlMethodResponse) not_implemented =
+      FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  fl_method_call_respond(method_call, not_implemented, nullptr);
+}
+
+static void register_system_idle_channel(FlView* view) {
+  FlEngine* engine = fl_view_get_engine(view);
+  FlBinaryMessenger* messenger = fl_engine_get_binary_messenger(engine);
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  FlMethodChannel* channel = fl_method_channel_new(
+      messenger, kSystemIdleChannel, FL_METHOD_CODEC(codec));
+
+  fl_method_channel_set_method_call_handler(
+      channel, system_idle_method_call_handler, nullptr, nullptr);
+}
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
@@ -76,6 +285,7 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+  register_system_idle_channel(view);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }

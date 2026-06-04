@@ -1,8 +1,31 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <windows.h>
 
 #include "flutter/generated_plugin_registrant.h"
+
+namespace {
+
+constexpr char kSystemIdleChannel[] = "structural/system_idle";
+
+std::optional<int64_t> GetIdleMilliseconds() {
+  LASTINPUTINFO info;
+  info.cbSize = sizeof(LASTINPUTINFO);
+  if (!GetLastInputInfo(&info)) {
+    return std::nullopt;
+  }
+
+  const ULONGLONG now = GetTickCount64();
+  const ULONGLONG last = static_cast<ULONGLONG>(info.dwTime);
+  if (now < last) {
+    return std::nullopt;
+  }
+
+  return static_cast<int64_t>(now - last);
+}
+
+}  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -25,6 +48,32 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  system_idle_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), kSystemIdleChannel,
+          &flutter::StandardMethodCodec::GetInstance());
+  system_idle_channel_->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+             result) {
+        if (call.method_name() == "isSupported") {
+          result->Success(flutter::EncodableValue(true));
+          return;
+        }
+
+        if (call.method_name() == "getIdleMilliseconds") {
+          const auto idle_ms = GetIdleMilliseconds();
+          if (!idle_ms.has_value()) {
+            result->Success(flutter::EncodableValue());
+            return;
+          }
+
+          result->Success(flutter::EncodableValue(idle_ms.value()));
+          return;
+        }
+
+        result->NotImplemented();
+      });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
