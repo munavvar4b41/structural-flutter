@@ -1,15 +1,22 @@
 import 'package:flutter/material.dart';
 
+import '../../services/app_controller.dart';
+import '../notifications/notification_bell.dart';
+
 class BoardHeading extends StatelessWidget implements PreferredSizeWidget {
   const BoardHeading({
     super.key,
+    required this.controller,
     this.onRefresh,
     this.onSettings,
+    this.onNewTask,
     this.refreshEnabled = true,
   });
 
+  final AppController controller;
   final VoidCallback? onRefresh;
   final VoidCallback? onSettings;
+  final VoidCallback? onNewTask;
   final bool refreshEnabled;
 
   @override
@@ -43,7 +50,7 @@ class BoardHeading extends StatelessWidget implements PreferredSizeWidget {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Tasks assigned to you, grouped by status. Click a card to open the task in your browser.',
+                      'Tasks assigned to you, grouped by status. Open a card to view details in the app.',
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),
@@ -51,6 +58,13 @@ class BoardHeading extends StatelessWidget implements PreferredSizeWidget {
                   ],
                 ),
               ),
+              if (onNewTask != null)
+                IconButton(
+                  tooltip: 'New task',
+                  onPressed: onNewTask,
+                  icon: const Icon(Icons.add),
+                ),
+              NotificationBell(controller: controller),
               if (onRefresh != null)
                 IconButton(
                   tooltip: 'Refresh',

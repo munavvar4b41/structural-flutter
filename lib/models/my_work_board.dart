@@ -132,6 +132,7 @@ class MyWorkTaskCard {
     required this.taskShowUrl,
     required this.isAssigneeOnlyLimited,
     required this.canSubmitTaskCompletion,
+    required this.childrenCount,
     required this.timerTodaySeconds,
     required this.timerState,
   });
@@ -153,6 +154,7 @@ class MyWorkTaskCard {
           jsonBool(json['is_assignee_only_limited']),
       canSubmitTaskCompletion:
           jsonBool(json['can_submit_task_completion']),
+      childrenCount: jsonIntOrNull(json['children_count']) ?? 0,
       timerTodaySeconds:
           jsonIntOrNull(json['timer_today_seconds']) ?? 0,
       timerState: json['timer_state'] as String? ?? 'idle',
@@ -170,10 +172,12 @@ class MyWorkTaskCard {
   final String taskShowUrl;
   final bool isAssigneeOnlyLimited;
   final bool canSubmitTaskCompletion;
+  final int childrenCount;
   final int timerTodaySeconds;
   final String timerState;
 
   MyWorkTaskCard copyWith({
+    String? status,
     int? timerTodaySeconds,
     String? timerState,
   }) {
@@ -181,7 +185,7 @@ class MyWorkTaskCard {
       id: id,
       projectId: projectId,
       title: title,
-      status: status,
+      status: status ?? this.status,
       estimatedMinutes: estimatedMinutes,
       project: project,
       requirement: requirement,
@@ -189,6 +193,7 @@ class MyWorkTaskCard {
       taskShowUrl: taskShowUrl,
       isAssigneeOnlyLimited: isAssigneeOnlyLimited,
       canSubmitTaskCompletion: canSubmitTaskCompletion,
+      childrenCount: childrenCount,
       timerTodaySeconds: timerTodaySeconds ?? this.timerTodaySeconds,
       timerState: timerState ?? this.timerState,
     );

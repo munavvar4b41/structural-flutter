@@ -25,6 +25,7 @@ void main() {
               'task_show_url': 'http://localhost/admin/projects/2/tasks/1',
               'is_assignee_only_limited': false,
               'can_submit_task_completion': true,
+              'children_count': 2,
               'timer_today_seconds': 120,
               'timer_state': 'running',
             },

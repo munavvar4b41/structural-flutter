@@ -3,18 +3,19 @@ import 'package:flutter/material.dart';
 import '../../models/my_work_board.dart';
 
 class TaskTimerActions extends StatelessWidget {
-  const TaskTimerActions({
+  TaskTimerActions({
     super.key,
-    required this.task,
+    String? timerState,
+    MyWorkTaskCard? task,
     required this.isActive,
     required this.onView,
     required this.onStart,
     required this.onPause,
     required this.onResume,
     required this.onStop,
-  });
+  }) : timerState = timerState ?? task?.timerState ?? 'idle';
 
-  final MyWorkTaskCard task;
+  final String timerState;
   final bool isActive;
   final VoidCallback onView;
   final VoidCallback onStart;
@@ -22,9 +23,9 @@ class TaskTimerActions extends StatelessWidget {
   final VoidCallback onResume;
   final VoidCallback onStop;
 
-  bool get _isRunning => isActive && task.timerState == 'running';
+  bool get _isRunning => isActive && timerState == 'running';
 
-  bool get _isPaused => isActive && task.timerState == 'paused';
+  bool get _isPaused => isActive && timerState == 'paused';
 
   @override
   Widget build(BuildContext context) {

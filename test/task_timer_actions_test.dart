@@ -16,6 +16,7 @@ MyWorkTaskCard _task({String timerState = 'idle'}) {
     taskShowUrl: 'https://example.com/task/1',
     isAssigneeOnlyLimited: false,
     canSubmitTaskCompletion: false,
+    childrenCount: 0,
     timerTodaySeconds: 0,
     timerState: timerState,
   );

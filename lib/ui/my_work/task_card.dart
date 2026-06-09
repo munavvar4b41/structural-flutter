@@ -10,7 +10,10 @@ class TaskCardWidget extends StatelessWidget {
     super.key,
     required this.task,
     required this.isActive,
+    required this.statusOptions,
     required this.onView,
+    required this.onStatusChange,
+    required this.onSubmitCompletion,
     required this.onStart,
     required this.onPause,
     required this.onResume,
@@ -19,7 +22,10 @@ class TaskCardWidget extends StatelessWidget {
 
   final MyWorkTaskCard task;
   final bool isActive;
+  final List<StatusOption> statusOptions;
   final VoidCallback onView;
+  final ValueChanged<String> onStatusChange;
+  final VoidCallback? onSubmitCompletion;
   final VoidCallback onStart;
   final VoidCallback onPause;
   final VoidCallback onResume;
@@ -109,7 +115,8 @@ class TaskCardWidget extends StatelessWidget {
                   const SizedBox(height: 8),
                   if (task.estimatedMinutes != null)
                     Text(
-                      'Est.: ${formatTaskMinutes(task.estimatedMinutes!)}',
+                      'Est.: ${formatTaskMinutes(task.estimatedMinutes!)}'
+                      '${task.childrenCount > 0 ? ' · ${task.childrenCount} subtasks' : ''}',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
                         fontSize: 12,
@@ -148,14 +155,54 @@ class TaskCardWidget extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-            child: TaskTimerActions(
-              task: task,
-              isActive: isActive,
-              onView: onView,
-              onStart: onStart,
-              onPause: onPause,
-              onResume: onResume,
-              onStop: onStop,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DropdownButtonFormField<String>(
+                  value: task.status,
+                  isDense: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Status',
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                  items: statusOptions
+                      .map(
+                        (o) => DropdownMenuItem(
+                          value: o.value,
+                          child: Text(o.label, style: const TextStyle(fontSize: 12)),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null && v != task.status) {
+                      onStatusChange(v);
+                    }
+                  },
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    if (task.canSubmitTaskCompletion && onSubmitCompletion != null)
+                      IconButton(
+                        tooltip: 'Submit for completion',
+                        onPressed: onSubmitCompletion,
+                        icon: const Icon(Icons.check_circle_outline, size: 20),
+                      ),
+                    Expanded(
+                      child: TaskTimerActions(
+                        task: task,
+                        isActive: isActive,
+                        onView: onView,
+                        onStart: onStart,
+                        onPause: onPause,
+                        onResume: onResume,
+                        onStop: onStop,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         ],

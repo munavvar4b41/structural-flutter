@@ -1,12 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/my_work_board.dart';
 import '../../services/app_controller.dart';
 import '../../services/desktop_api_client.dart';
 import '../../theme/app_theme.dart';
+import '../task/task_form_sheet.dart';
 import 'board_heading.dart';
 import 'task_card.dart';
 
@@ -173,14 +173,84 @@ class _MyWorkPageState extends State<MyWorkPage> {
     unawaited(_load(silent: true));
   }
 
-  Future<void> _openUrl(String url) async {
-    final uri = Uri.parse(url);
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+  void _openTask(MyWorkTaskCard task) {
+    widget.controller.openTaskDetail(
+      projectId: task.projectId,
+      taskId: task.id,
+    );
+  }
+
+  Future<void> _updateTaskStatus(MyWorkTaskCard task, String status) async {
+    try {
+      await widget.controller.api.updateTask(
+        projectId: task.projectId,
+        taskId: task.id,
+        data: {'status': status},
+      );
+      await _load(silent: true);
+    } on DesktopApiException catch (e) {
+      if (e.statusCode == 401) {
+        await widget.controller.requireLogin();
+        return;
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open $url')),
+          SnackBar(content: Text(e.message)),
         );
       }
+    }
+  }
+
+  Future<void> _submitCompletion(MyWorkTaskCard task) async {
+    try {
+      await widget.controller.api.submitTaskCompletion(
+        projectId: task.projectId,
+        taskId: task.id,
+      );
+      await _load(silent: true);
+    } on DesktopApiException catch (e) {
+      if (e.statusCode == 401) {
+        await widget.controller.requireLogin();
+        return;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message)),
+        );
+      }
+    }
+  }
+
+  Future<void> _createTask() async {
+    final board = _board;
+    if (board == null) {
+      return;
+    }
+
+    int? projectId = _projectId;
+    if (projectId == null && board.projectOptions.length == 1) {
+      projectId = board.projectOptions.first.value;
+    }
+
+    if (projectId == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Select a project filter before creating a task.'),
+        ),
+      );
+      return;
+    }
+
+    final saved = await TaskFormSheet.show(
+      context,
+      controller: widget.controller,
+      projectId: projectId,
+    );
+    if (saved == true) {
+      await _load(silent: true);
     }
   }
 
@@ -210,8 +280,10 @@ class _MyWorkPageState extends State<MyWorkPage> {
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: BoardHeading(
+        controller: widget.controller,
         onRefresh: _refresh,
         onSettings: () => widget.controller.showSettings(),
+        onNewTask: _createTask,
         refreshEnabled: !_loading && !_refreshing,
       ),
       body: _loading
@@ -238,7 +310,9 @@ class _MyWorkPageState extends State<MyWorkPage> {
                         child: _KanbanBoard(
                           board: _board!,
                           activeTaskId: activeTaskId,
-                          onOpenTask: _openUrl,
+                          onOpenTask: _openTask,
+                          onStatusChange: _updateTaskStatus,
+                          onSubmitCompletion: _submitCompletion,
                           onStartTimer: _startTimer,
                           onPauseTimer: _pauseTimer,
                           onResumeTimer: _resumeTimer,
@@ -321,6 +395,8 @@ class _KanbanBoard extends StatefulWidget {
     required this.board,
     required this.activeTaskId,
     required this.onOpenTask,
+    required this.onStatusChange,
+    required this.onSubmitCompletion,
     required this.onStartTimer,
     required this.onPauseTimer,
     required this.onResumeTimer,
@@ -330,7 +406,9 @@ class _KanbanBoard extends StatefulWidget {
 
   final MyWorkBoard board;
   final int? activeTaskId;
-  final Future<void> Function(String url) onOpenTask;
+  final void Function(MyWorkTaskCard task) onOpenTask;
+  final Future<void> Function(MyWorkTaskCard task, String status) onStatusChange;
+  final Future<void> Function(MyWorkTaskCard task) onSubmitCompletion;
   final Future<void> Function(MyWorkTaskCard task) onStartTimer;
   final Future<void> Function() onPauseTimer;
   final Future<void> Function() onResumeTimer;
@@ -380,8 +458,11 @@ class _KanbanBoardState extends State<_KanbanBoard> {
         for (final column in widget.board.columns)
           _StatusColumn(
             column: column,
+            statusOptions: widget.board.statusOptions,
             activeTaskId: widget.activeTaskId,
             onOpenTask: widget.onOpenTask,
+            onStatusChange: widget.onStatusChange,
+            onSubmitCompletion: widget.onSubmitCompletion,
             onStartTimer: widget.onStartTimer,
             onPauseTimer: widget.onPauseTimer,
             onResumeTimer: widget.onResumeTimer,
@@ -401,8 +482,11 @@ class _KanbanBoardState extends State<_KanbanBoard> {
 class _StatusColumn extends StatelessWidget {
   const _StatusColumn({
     required this.column,
+    required this.statusOptions,
     required this.activeTaskId,
     required this.onOpenTask,
+    required this.onStatusChange,
+    required this.onSubmitCompletion,
     required this.onStartTimer,
     required this.onPauseTimer,
     required this.onResumeTimer,
@@ -411,8 +495,11 @@ class _StatusColumn extends StatelessWidget {
   });
 
   final MyWorkColumn column;
+  final List<StatusOption> statusOptions;
   final int? activeTaskId;
-  final Future<void> Function(String url) onOpenTask;
+  final void Function(MyWorkTaskCard task) onOpenTask;
+  final Future<void> Function(MyWorkTaskCard task, String status) onStatusChange;
+  final Future<void> Function(MyWorkTaskCard task) onSubmitCompletion;
   final Future<void> Function(MyWorkTaskCard task) onStartTimer;
   final Future<void> Function() onPauseTimer;
   final Future<void> Function() onResumeTimer;
@@ -509,7 +596,12 @@ class _StatusColumn extends StatelessWidget {
                       return TaskCardWidget(
                         task: task,
                         isActive: isActive,
-                        onView: () => onOpenTask(task.taskShowUrl),
+                        statusOptions: statusOptions,
+                        onView: () => onOpenTask(task),
+                        onStatusChange: (status) => onStatusChange(task, status),
+                        onSubmitCompletion: task.canSubmitTaskCompletion
+                            ? () => onSubmitCompletion(task)
+                            : null,
                         onStart: () => onStartTimer(task),
                         onPause: onPauseTimer,
                         onResume: onResumeTimer,

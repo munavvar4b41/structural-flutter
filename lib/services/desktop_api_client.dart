@@ -2,6 +2,9 @@ import 'package:dio/dio.dart';
 
 import '../models/auth_user.dart';
 import '../models/my_work_board.dart';
+import '../models/notifications.dart';
+import '../models/task_form_options.dart';
+import '../models/task_show.dart';
 import '../models/tray_snapshot.dart';
 import 'auth_store.dart';
 
@@ -189,6 +192,246 @@ class DesktopApiClient {
       return TraySnapshot.fromJson(_decodeMap(response.data, context: url));
     } on DioException catch (e) {
       throw _mapError(e, fallback: 'Timer action failed.');
+    }
+  }
+
+  Future<NotificationFeed> fetchNotifications() async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '$_baseUrl/api/desktop/notifications',
+      );
+      return NotificationFeed.fromJson(
+        _decodeMap(response.data, context: 'notifications API'),
+      );
+    } on DioException catch (e) {
+      throw _mapError(e, fallback: 'Could not load notifications.');
+    }
+  }
+
+  Future<NotificationFeed> markNotificationRead(String notificationId) async {
+    try {
+      final response = await _dio.patch<Map<String, dynamic>>(
+        '$_baseUrl/api/desktop/notifications/$notificationId',
+      );
+      return NotificationFeed.fromJson(
+        _decodeMap(response.data, context: 'mark notification read'),
+      );
+    } on DioException catch (e) {
+      throw _mapError(e, fallback: 'Could not mark notification as read.');
+    }
+  }
+
+  Future<NotificationFeed> markAllNotificationsRead() async {
+    try {
+      final response = await _dio.patch<Map<String, dynamic>>(
+        '$_baseUrl/api/desktop/notifications/mark-all-read',
+      );
+      return NotificationFeed.fromJson(
+        _decodeMap(response.data, context: 'mark all notifications read'),
+      );
+    } on DioException catch (e) {
+      throw _mapError(e, fallback: 'Could not mark all notifications as read.');
+    }
+  }
+
+  Future<TaskShowPayload> fetchTaskShow({
+    required int projectId,
+    required int taskId,
+  }) async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '$_baseUrl/api/desktop/projects/$projectId/tasks/$taskId',
+      );
+      return TaskShowPayload.fromJson(
+        _decodeMap(response.data, context: 'task show API'),
+      );
+    } on DioException catch (e) {
+      throw _mapError(e, fallback: 'Could not load task.');
+    }
+  }
+
+  Future<TaskFormOptions> fetchTaskFormOptions({
+    required int projectId,
+    int? excludeTaskId,
+  }) async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '$_baseUrl/api/desktop/projects/$projectId/tasks/form-options',
+        queryParameters: excludeTaskId != null
+            ? {'exclude_task_id': excludeTaskId}
+            : null,
+      );
+      return TaskFormOptions.fromJson(
+        _decodeMap(response.data, context: 'task form options API'),
+      );
+    } on DioException catch (e) {
+      throw _mapError(e, fallback: 'Could not load task form options.');
+    }
+  }
+
+  Future<TaskShowPayload> createTask({
+    required int projectId,
+    required Map<String, dynamic> data,
+  }) async {
+    return _taskMutation(
+      '$_baseUrl/api/desktop/projects/$projectId/tasks',
+      method: 'post',
+      data: data,
+      fallback: 'Could not create task.',
+    );
+  }
+
+  Future<TaskShowPayload> updateTask({
+    required int projectId,
+    required int taskId,
+    required Map<String, dynamic> data,
+  }) async {
+    return _taskMutation(
+      '$_baseUrl/api/desktop/projects/$projectId/tasks/$taskId',
+      method: 'patch',
+      data: data,
+      fallback: 'Could not update task.',
+    );
+  }
+
+  Future<void> deleteTask({
+    required int projectId,
+    required int taskId,
+  }) async {
+    try {
+      await _dio.delete(
+        '$_baseUrl/api/desktop/projects/$projectId/tasks/$taskId',
+      );
+    } on DioException catch (e) {
+      throw _mapError(e, fallback: 'Could not delete task.');
+    }
+  }
+
+  Future<TaskShowPayload> submitTaskCompletion({
+    required int projectId,
+    required int taskId,
+  }) async {
+    return _taskMutation(
+      '$_baseUrl/api/desktop/projects/$projectId/tasks/$taskId/submit-completion',
+      method: 'post',
+      fallback: 'Could not submit task for completion.',
+    );
+  }
+
+  Future<TaskShowPayload> confirmTaskCompletion({
+    required int projectId,
+    required int taskId,
+    required Map<String, dynamic> data,
+  }) async {
+    return _taskMutation(
+      '$_baseUrl/api/desktop/projects/$projectId/tasks/$taskId/confirm-completion',
+      method: 'post',
+      data: data,
+      fallback: 'Could not confirm task completion.',
+    );
+  }
+
+  Future<TaskShowPayload> createChecklistItem({
+    required int projectId,
+    required int taskId,
+    required String title,
+  }) async {
+    return _taskMutation(
+      '$_baseUrl/api/desktop/projects/$projectId/tasks/$taskId/checklist-items',
+      method: 'post',
+      data: {'title': title},
+      fallback: 'Could not add checklist item.',
+    );
+  }
+
+  Future<TaskShowPayload> updateChecklistItem({
+    required int projectId,
+    required int taskId,
+    required int itemId,
+    required Map<String, dynamic> data,
+  }) async {
+    return _taskMutation(
+      '$_baseUrl/api/desktop/projects/$projectId/tasks/$taskId/checklist-items/$itemId',
+      method: 'patch',
+      data: data,
+      fallback: 'Could not update checklist item.',
+    );
+  }
+
+  Future<TaskShowPayload> deleteChecklistItem({
+    required int projectId,
+    required int taskId,
+    required int itemId,
+  }) async {
+    return _taskMutation(
+      '$_baseUrl/api/desktop/projects/$projectId/tasks/$taskId/checklist-items/$itemId',
+      method: 'delete',
+      fallback: 'Could not delete checklist item.',
+    );
+  }
+
+  Future<TaskShowPayload> createTimeEntry({
+    required int projectId,
+    required int taskId,
+    required Map<String, dynamic> data,
+  }) async {
+    return _taskMutation(
+      '$_baseUrl/api/desktop/projects/$projectId/tasks/$taskId/time-entries',
+      method: 'post',
+      data: data,
+      fallback: 'Could not add time entry.',
+    );
+  }
+
+  Future<TaskShowPayload> updateTimeEntry({
+    required int projectId,
+    required int taskId,
+    required int entryId,
+    required Map<String, dynamic> data,
+  }) async {
+    return _taskMutation(
+      '$_baseUrl/api/desktop/projects/$projectId/tasks/$taskId/time-entries/$entryId',
+      method: 'patch',
+      data: data,
+      fallback: 'Could not update time entry.',
+    );
+  }
+
+  Future<TaskShowPayload> deleteTimeEntry({
+    required int projectId,
+    required int taskId,
+    required int entryId,
+  }) async {
+    return _taskMutation(
+      '$_baseUrl/api/desktop/projects/$projectId/tasks/$taskId/time-entries/$entryId',
+      method: 'delete',
+      fallback: 'Could not delete time entry.',
+    );
+  }
+
+  Future<TaskShowPayload> _taskMutation(
+    String url, {
+    required String method,
+    Map<String, dynamic>? data,
+    required String fallback,
+  }) async {
+    try {
+      final Response<Map<String, dynamic>> response;
+      switch (method) {
+        case 'post':
+          response = await _dio.post<Map<String, dynamic>>(url, data: data);
+        case 'patch':
+          response = await _dio.patch<Map<String, dynamic>>(url, data: data);
+        case 'delete':
+          response = await _dio.delete<Map<String, dynamic>>(url);
+        default:
+          throw ArgumentError('Unsupported method: $method');
+      }
+      return TaskShowPayload.fromJson(
+        _decodeMap(response.data, context: url),
+      );
+    } on DioException catch (e) {
+      throw _mapError(e, fallback: fallback);
     }
   }
 

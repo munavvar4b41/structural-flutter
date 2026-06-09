@@ -5,12 +5,14 @@ import 'package:window_manager/window_manager.dart';
 
 import 'auth_store.dart';
 import 'desktop_api_client.dart';
+import 'notification_service.dart';
 import 'tray_service.dart';
 
 class AppController extends ChangeNotifier with WindowListener {
   AppController() {
     authStore = AuthStore();
     api = DesktopApiClient(authStore);
+    notifications = NotificationService(api: api);
     tray = TrayService(
       api: api,
       onViewAllTasks: showMyWork,
@@ -19,12 +21,14 @@ class AppController extends ChangeNotifier with WindowListener {
       onQuit: quit,
     );
     tray.addListener(notifyListeners);
+    notifications.addListener(notifyListeners);
   }
 
   final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   late final AuthStore authStore;
   late final DesktopApiClient api;
+  late final NotificationService notifications;
   late final TrayService tray;
 
   bool _initialized = false;
@@ -55,6 +59,7 @@ class AppController extends ChangeNotifier with WindowListener {
 
     if (authStore.isAuthenticated) {
       await tray.start();
+      notifications.start();
       _sessionReady = true;
     }
 
@@ -64,6 +69,7 @@ class AppController extends ChangeNotifier with WindowListener {
 
   Future<void> onLoginSuccess() async {
     await tray.start();
+    notifications.start();
     _sessionReady = true;
     notifyListeners();
     navigatorKey.currentState?.pushNamedAndRemoveUntil(
@@ -74,6 +80,7 @@ class AppController extends ChangeNotifier with WindowListener {
 
   Future<void> requireLogin() async {
     await tray.stop();
+    notifications.stop();
     await authStore.clearSession();
     _sessionReady = false;
     notifyListeners();
@@ -90,12 +97,20 @@ class AppController extends ChangeNotifier with WindowListener {
       // Clear local session even if remote logout fails.
     }
     await tray.stop();
+    notifications.stop();
     await authStore.clearSession();
     _sessionReady = false;
     notifyListeners();
     navigatorKey.currentState?.pushNamedAndRemoveUntil(
       '/login',
       (route) => false,
+    );
+  }
+
+  void openTaskDetail({required int projectId, required int taskId}) {
+    navigatorKey.currentState?.pushNamed(
+      '/tasks',
+      arguments: TaskDetailRouteArgs(projectId: projectId, taskId: taskId),
     );
   }
 
@@ -150,7 +165,18 @@ class AppController extends ChangeNotifier with WindowListener {
   @override
   void dispose() {
     windowManager.removeListener(this);
+    notifications.dispose();
     tray.dispose();
     super.dispose();
   }
+}
+
+class TaskDetailRouteArgs {
+  const TaskDetailRouteArgs({
+    required this.projectId,
+    required this.taskId,
+  });
+
+  final int projectId;
+  final int taskId;
 }
